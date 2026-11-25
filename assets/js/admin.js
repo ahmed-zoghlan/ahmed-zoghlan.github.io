@@ -11,9 +11,12 @@ function api(action, payload){
   return fetch(API_URL, {method:'POST', headers:{'Content-Type':'text/plain'}, body:JSON.stringify(payload)})
     .then(function(r){ return r.json(); });
 }
-function toast(msg){
-  var d=document.createElement('div'); d.className='toast'; d.textContent=msg;
-  document.body.appendChild(d); setTimeout(function(){ d.remove(); }, 2600);
+function toast(msg, type){
+  var d=document.createElement('div'); d.className='toast'+(type?' '+type:''); d.textContent=msg;
+  d.setAttribute('role','status');
+  document.body.appendChild(d);
+  requestAnimationFrame(function(){ d.classList.add('show'); });
+  setTimeout(function(){ d.classList.remove('show'); setTimeout(function(){ d.remove(); }, 300); }, type==='err' ? 5000 : 3200);
 }
 function hasPerm(p){ return S.perms.indexOf('all')>=0 || S.perms.indexOf(p)>=0; }
 function adminBase(){ return location.href.split('#')[0]; }
@@ -359,11 +362,24 @@ function enhanceImage(file){
       C.contact.showForm=gc('c_showform');
       C.assistant={enabled:gc('c_assistant')};
       syncLists();
+      var btn=document.getElementById('saveBtn'), label=btn.textContent;
+      if(btn.disabled) return;
+      btn.disabled=true; btn.classList.add('loading'); btn.textContent='جارٍ الحفظ...';
       note.className='note'; note.textContent='جارٍ الحفظ...';
+      function done(){ btn.disabled=false; btn.classList.remove('loading'); btn.textContent=label; }
       api('saveContent',{token:S.token, content:C}).then(function(r){
-        if(r&&r.ok){ note.className='note ok'; note.textContent='تم الحفظ والنشر ✓'; toast('تم نشر المحتوى'); }
-        else { note.className='note err'; note.textContent='فشل الحفظ ('+((r&&r.error)||'')+')'; }
-      }).catch(function(){ note.className='note err'; note.textContent='خطأ في الاتصال'; });
+        if(!(r&&r.ok)){ throw new Error((r&&r.error)||'unknown'); }
+        /* verify it really persisted: read it back */
+        return api('getContent',{}).then(function(g){
+          var sv=g&&g.content;
+          if(!sv || (sv.about&&sv.about.ar)!==C.about.ar || (sv.meta&&sv.meta.name_ar)!==C.meta.name_ar) throw new Error('verify');
+          done(); note.className='note ok'; note.textContent='تم الحفظ والنشر ✓ (تم التحقق من الحفظ)'; toast('تم الحفظ ✓','ok');
+        });
+      }).catch(function(e){
+        done(); var m=String(e&&e.message||e);
+        var txt = m==='auth' ? 'انتهت الجلسة، سجّل الدخول مرة أخرى' : m==='verify' ? 'تعذر التحقق من الحفظ، أعد المحاولة' : (m==='Failed to fetch'||m==='unknown'||m==='server') ? 'تعذر الحفظ، تحقق من الاتصال وأعد المحاولة' : 'فشل الحفظ ('+m+')';
+        note.className='note err'; note.textContent=txt; toast(txt,'err');
+      });
     });
   });
 }
